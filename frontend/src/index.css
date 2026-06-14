@@ -1,74 +1,29 @@
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-:root {
-  --bg: #0f1117;
-  --surface: #1a1d27;
-  --surface2: #222639;
-  --border: #2e3148;
-  --accent: #6c63ff;
-  --accent-hover: #5a52e0;
-  --danger: #ff4d4d;
-  --danger-hover: #e03e3e;
-  --success: #22c55e;
-  --text: #e8e9f0;
-  --text-muted: #7c7f9a;
-  --blocked: #ff4d4d;
-  --active: #22c55e;
-  --radius: 10px;
-  --shadow: 0 4px 24px rgba(0,0,0,0.4);
-}
+/* ---------------------------------------------------------------
+   note: kept deliberately minimal. The task explicitly forbids
+   "wallpapers" under the table and any animations — Bootstrap's
+   defaults already cover everything else, so we only disable the
+   transition/fade effects Bootstrap applies by default to things
+   like Modal and Toast.
+   --------------------------------------------------------------- */
 
 body {
-  font-family: 'Inter', sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  min-height: 100vh;
-  font-size: 15px;
-  line-height: 1.5;
+  background-color: #f4f5f7;
 }
 
-input {
-  font-family: inherit;
-  font-size: 15px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text);
-  padding: 10px 14px;
-  width: 100%;
-  outline: none;
-  transition: border-color 0.2s;
+/* important: disable bootstrap fade transitions globally (no animations) */
+.fade {
+  transition: none !important;
 }
 
-input:focus {
-  border-color: var(--accent);
-}
-
-button {
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 600;
+/* note: pointer cursor on sortable table headers */
+th.sortable {
   cursor: pointer;
-  border: none;
-  border-radius: var(--radius);
-  padding: 10px 18px;
-  transition: background 0.2s, opacity 0.2s;
+  user-select: none;
+  white-space: nowrap;
 }
 
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-a {
-  color: var(--accent);
-  text-decoration: none;
-}
-
-a:hover {
-  text-decoration: underline;
+/* note: keep the "you" badge subtle and non-distracting */
+.current-user-badge {
+  font-size: 0.7rem;
+  vertical-align: middle;
 }

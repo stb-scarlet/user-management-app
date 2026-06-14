@@ -1,122 +1,184 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Container, Toast, ToastContainer } from 'react-bootstrap'
 import { useAuth } from '../context/AuthContext'
 import api from '../api/axios'
-import styles from './Dashboard.module.css'
+import Header from '../components/Header'
+import Toolbar from '../components/Toolbar' 
+import UsersTable from '../components/UsersTable'
+import ConfirmModal from '../components/ConfirmModal'
 
 export default function Dashboard() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
 
   const [users, setUsers] = useState([])
-  const [selected, setSelected] = useState(new Set())
+  const [selectedIds, setSelectedIds] = useState(new Set())
   const [loading, setLoading] = useState(true)
-  const [actionLoading, setActionLoading] = useState(false)
-  const [toast, setToast] = useState(null)
+  const [filter, setFilter] = useState('')
+  const [sortKey, setSortKey] = useState('last_login')
+  const [sortDir, setSortDir] = useState('desc')
+  const [toast, setToast] = useState(null) // { message, variant }
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
 
-  const showToast = (msg, type = 'success') => {
-    setToast({ msg, type })
-    setTimeout(() => setToast(null), 3000)
+  const showToast = (message, variant = 'success') => {
+    setToast({ message, variant })
   }
 
-  // If current user gets blocked → auto logout + redirect
-  const handleAuthError = useCallback((err) => {
-    if (err.response?.status === 403 || err.response?.data?.error === 'blocked') {
-      logout()
-      navigate('/login')
-    }
-  }, [logout, navigate])
-
+  // ---------------------------------------------------------------
+  // Fetch users.
+  //
+  // important: NOTE the 401/"blocked" case is NOT handled here
+  // directly — it's caught globally by the axios response
+  // interceptor (src/api/axios.js), which calls AuthContext's
+  // onBlocked handler and redirects to /login. We only need to
+  // handle the "happy path" here.
+  // ---------------------------------------------------------------
   const fetchUsers = useCallback(async () => {
     try {
       const res = await api.get('/users')
       setUsers(res.data)
-    } catch (err) {
-      handleAuthError(err)
+    } catch {
+      // Errors (including "blocked") are handled by the interceptor.
     } finally {
       setLoading(false)
     }
-  }, [handleAuthError])
+  }, [])
 
   useEffect(() => {
     fetchUsers()
   }, [fetchUsers])
 
-  // Checkbox logic
-  const allSelected = users.length > 0 && selected.size === users.length
-  const someSelected = selected.size > 0
+  // ---------------------------------------------------------------
+  // Filtering + sorting (client-side, on top of the backend's
+  // default "last seen" ordering).
+  // ---------------------------------------------------------------
+  const visibleUsers = useMemo(() => {
+    let list = users
+
+    if (filter.trim()) {
+      const f = filter.trim().toLowerCase()
+      list = list.filter(
+        (u) => u.name.toLowerCase().includes(f) || u.email.toLowerCase().includes(f)
+      )
+    }
+
+    const sorted = [...list].sort((a, b) => {
+      let av = a[sortKey]
+      let bv = b[sortKey]
+
+      // note: last_login can be null ("never logged in") — push those
+      // to the end regardless of sort direction.
+      if (sortKey === 'last_login') {
+        if (av === null && bv === null) return 0
+        if (av === null) return 1
+        if (bv === null) return -1
+        av = new Date(av).getTime()
+        bv = new Date(bv).getTime()
+      } else if (typeof av === 'string') {
+        av = av.toLowerCase()
+        bv = bv.toLowerCase()
+      }
+
+      if (av < bv) return sortDir === 'asc' ? -1 : 1
+      if (av > bv) return sortDir === 'asc' ? 1 : -1
+      return 0
+    })
+
+    return sorted
+  }, [users, filter, sortKey, sortDir])
+
+  const handleSort = (key) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortKey(key)
+      setSortDir('asc')
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // Selection helpers.
+  // ---------------------------------------------------------------
+  const allSelected = visibleUsers.length > 0 && visibleUsers.every((u) => selectedIds.has(u.id))
 
   const toggleAll = () => {
-    if (allSelected) setSelected(new Set())
-    else setSelected(new Set(users.map(u => u.id)))
+    const next = new Set(selectedIds)
+    if (allSelected) {
+      visibleUsers.forEach((u) => next.delete(u.id))
+    } else {
+      visibleUsers.forEach((u) => next.add(u.id))
+    }
+    setSelectedIds(next)
   }
 
   const toggleOne = (id) => {
-    const next = new Set(selected)
+    const next = new Set(selectedIds)
     next.has(id) ? next.delete(id) : next.add(id)
-    setSelected(next)
+    setSelectedIds(next)
   }
 
-  // Block selected users
+  const clearSelectionAndRefresh = async (selfWasAffected) => {
+    setSelectedIds(new Set())
+    if (selfWasAffected) {
+      // important: an admin CAN block/delete themselves. When that
+      // happens we don't need to wait for the next request to be
+      // rejected — we can log out immediately for a clean UX. (The
+      // requireActiveUser middleware would reject the next request
+      // anyway, so this is consistent with the spec, just smoother.)
+      logout()
+      navigate('/login')
+      return
+    }
+    await fetchUsers()
+  }
+
+  // ---------------------------------------------------------------
+  // Toolbar actions.
+  // ---------------------------------------------------------------
   const handleBlock = async () => {
-    if (!someSelected) return
-    setActionLoading(true)
+    const ids = [...selectedIds]
+    const selfIncluded = ids.includes(user.id)
     try {
-      await api.patch('/users/status', { ids: [...selected], status: 'blocked' })
-      showToast('Users blocked successfully.')
-      setSelected(new Set())
-      await fetchUsers()
-      // Check if current user blocked themselves → redirect
-      if (selected.has(user.id)) {
-        logout()
-        navigate('/login')
-      }
+      await api.patch('/users/status', { ids, status: 'blocked' })
+      showToast('Selected user(s) blocked.')
+      await clearSelectionAndRefresh(selfIncluded)
     } catch (err) {
-      handleAuthError(err)
-      showToast('Action failed.', 'error')
-    } finally {
-      setActionLoading(false)
+      showToast(err.response?.data?.error || 'Action failed.', 'danger')
     }
   }
 
-  // Unblock selected users
   const handleUnblock = async () => {
-    if (!someSelected) return
-    setActionLoading(true)
+    const ids = [...selectedIds]
     try {
-      await api.patch('/users/status', { ids: [...selected], status: 'active' })
-      showToast('Users unblocked successfully.')
-      setSelected(new Set())
-      await fetchUsers()
+      await api.patch('/users/status', { ids, status: 'active' })
+      showToast('Selected user(s) unblocked.')
+      await clearSelectionAndRefresh(false)
     } catch (err) {
-      handleAuthError(err)
-      showToast('Action failed.', 'error')
-    } finally {
-      setActionLoading(false)
+      showToast(err.response?.data?.error || 'Action failed.', 'danger')
     }
   }
 
-  // Delete selected users
-  const handleDelete = async () => {
-    if (!someSelected) return
-    if (!confirm(`Delete ${selected.size} user(s)? This cannot be undone.`)) return
-    setActionLoading(true)
+  const handleDeleteConfirmed = async () => {
+    const ids = [...selectedIds]
+    const selfIncluded = ids.includes(user.id)
+    setShowDeleteModal(false)
     try {
-      await api.delete('/users', { data: { ids: [...selected] } })
-      showToast('Users deleted.')
-      setSelected(new Set())
-      // If current user deleted themselves
-      if (selected.has(user.id)) {
-        logout()
-        navigate('/login')
-      } else {
-        await fetchUsers()
-      }
+      await api.delete('/users', { data: { ids } })
+      showToast('Selected user(s) deleted.')
+      await clearSelectionAndRefresh(selfIncluded)
     } catch (err) {
-      handleAuthError(err)
-      showToast('Action failed.', 'error')
-    } finally {
-      setActionLoading(false)
+      showToast(err.response?.data?.error || 'Action failed.', 'danger')
+    }
+  }
+
+  const handleDeleteUnverified = async () => {
+    try {
+      const res = await api.delete('/users/unverified')
+      showToast(res.data.message)
+      await fetchUsers()
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Action failed.', 'danger')
     }
   }
 
@@ -125,143 +187,66 @@ export default function Dashboard() {
     navigate('/login')
   }
 
-  const formatDate = (dateStr) => {
-    if (!dateStr) return '—'
-    return new Date(dateStr).toLocaleString('en-GB', {
-      day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit'
-    })
-  }
-
   return (
-    <div className={styles.page}>
-      {/* Header */}
-      <header className={styles.header}>
-        <div className={styles.headerLeft}>
-          <span className={styles.logo}>⬡</span>
-          <span className={styles.appName}>UserBoard</span>
-        </div>
-        <div className={styles.headerRight}>
-          <span className={styles.currentUser}>
-            👤 {user?.name}
-          </span>
-          <button className={styles.btnLogout} onClick={handleLogout}>
-            Sign out
-          </button>
-        </div>
-      </header>
+    <>
+      <Header userName={user?.name} onLogout={handleLogout} />
 
-      {/* Main */}
-      <main className={styles.main}>
-        <div className={styles.toolbar}>
-          <h1 className={styles.pageTitle}>Users</h1>
-          <div className={styles.actions}>
-            <button
-              className={styles.btnBlock}
-              onClick={handleBlock}
-              disabled={!someSelected || actionLoading}
-              title="Block selected"
-            >
-              🔒 Block
-            </button>
-            <button
-              className={styles.btnUnblock}
-              onClick={handleUnblock}
-              disabled={!someSelected || actionLoading}
-              title="Unblock selected"
-            >
-              🔓 Unblock
-            </button>
-            <button
-              className={styles.btnDelete}
-              onClick={handleDelete}
-              disabled={!someSelected || actionLoading}
-              title="Delete selected"
-            >
-              🗑
-            </button>
-          </div>
-        </div>
+      <Container fluid="lg" className="py-4">
+        <h4 className="mb-3">Users</h4>
+
+        <Toolbar
+          selectedCount={selectedIds.size}
+          onBlock={handleBlock}
+          onUnblock={handleUnblock}
+          onDelete={() => setShowDeleteModal(true)}
+          onDeleteUnverified={handleDeleteUnverified}
+          filter={filter}
+          onFilterChange={setFilter}
+        />
 
         {loading ? (
-          <div className={styles.loading}>Loading users…</div>
+          <div className="text-center text-muted py-5">Loading users…</div>
         ) : (
-          <div className={styles.tableWrap}>
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                  <th>
-                    <input
-                      type="checkbox"
-                      checked={allSelected}
-                      onChange={toggleAll}
-                      className={styles.checkbox}
-                    />
-                  </th>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Status</th>
-                  <th>Last login</th>
-                  <th>Registered</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className={styles.empty}>No users found.</td>
-                  </tr>
-                )}
-                {users.map(u => (
-                  <tr
-                    key={u.id}
-                    className={`
-                      ${selected.has(u.id) ? styles.rowSelected : ''}
-                      ${u.id === user?.id ? styles.rowSelf : ''}
-                    `}
-                  >
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={selected.has(u.id)}
-                        onChange={() => toggleOne(u.id)}
-                        className={styles.checkbox}
-                      />
-                    </td>
-                    <td>
-                      {u.name}
-                      {u.id === user?.id && (
-                        <span className={styles.youBadge}>you</span>
-                      )}
-                    </td>
-                    <td className={styles.email}>{u.email}</td>
-                    <td>
-                      <span className={
-                        u.status === 'active' ? styles.statusActive : styles.statusBlocked
-                      }>
-                        {u.status === 'active' ? '● Active' : '● Blocked'}
-                      </span>
-                    </td>
-                    <td className={styles.muted}>{formatDate(u.last_login)}</td>
-                    <td className={styles.muted}>{formatDate(u.created_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <UsersTable
+            users={visibleUsers}
+            selectedIds={selectedIds}
+            onToggleOne={toggleOne}
+            onToggleAll={toggleAll}
+            allSelected={allSelected}
+            currentUserId={user?.id}
+            sortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+          />
         )}
 
-        <p className={styles.count}>
-          {users.length} user{users.length !== 1 ? 's' : ''} total
-          {someSelected && ` · ${selected.size} selected`}
+        <p className="text-muted small mt-2">
+          {visibleUsers.length} user{visibleUsers.length !== 1 ? 's' : ''}
+          {selectedIds.size > 0 && ` · ${selectedIds.size} selected`}
         </p>
-      </main>
+      </Container>
 
-      {/* Toast notification */}
-      {toast && (
-        <div className={`${styles.toast} ${toast.type === 'error' ? styles.toastError : ''}`}>
-          {toast.msg}
-        </div>
-      )}
-    </div>
+      <ConfirmModal
+        show={showDeleteModal}
+        title="Delete users"
+        body={`Are you sure you want to delete ${selectedIds.size} user(s)? This cannot be undone.`}
+        onConfirm={handleDeleteConfirmed}
+        onCancel={() => setShowDeleteModal(false)}
+      />
+
+      {/* note: status messages — animation={false} per "no animations" */}
+      <ToastContainer position="bottom-center" className="p-3">
+        <Toast
+          show={!!toast}
+          onClose={() => setToast(null)}
+          delay={3000}
+          autohide
+          animation={false}
+          bg={toast?.variant === 'danger' ? 'danger' : 'success'}
+        >
+          <Toast.Body className="text-white">{toast?.message}</Toast.Body>
+        </Toast>
+      </ToastContainer>
+    </>
   )
 }
