@@ -14,21 +14,16 @@ CREATE TABLE IF NOT EXISTS users (
   email               VARCHAR(255)      NOT NULL,
   password            VARCHAR(255)      NOT NULL,
 
--- note: three possible statuses as required by the task.
--- A freshly registered user is "unverified" until they click the
--- confirmation link sent to their e-mail. "blocked" users can never
--- log in, regardless of confirmation status.
-status ENUM(
-    'unverified',
-    'active',
-    'blocked'
-) NOT NULL DEFAULT 'unverified',
+  -- note: three possible statuses as required by the task.
+  -- A freshly registered user is "unverified" until they click the
+  -- confirmation link sent to their e-mail. "blocked" users can never
+  -- log in, regardless of confirmation status.
+  status              ENUM('unverified', 'active', 'blocked')
+                      NOT NULL DEFAULT 'unverified',
 
--- note: opaque random token used only for the e-mail confirmation
--- link. It is cleared (set to NULL) once the e-mail is confirmed.
-
-
-confirmation_token  VARCHAR(255)      DEFAULT NULL,
+  -- note: opaque random token used only for the e-mail confirmation
+  -- link. It is cleared (set to NULL) once the e-mail is confirmed.
+  confirmation_token  VARCHAR(255)      DEFAULT NULL,
 
   last_login          DATETIME          DEFAULT NULL,
   created_at          DATETIME          DEFAULT CURRENT_TIMESTAMP
@@ -44,4 +39,4 @@ confirmation_token  VARCHAR(255)      DEFAULT NULL,
 -- so at the same time. This is what makes the guarantee race-condition
 -- safe — application-level "SELECT ... then INSERT" checks are not.
 -- =====================================================================
-CREATE UNIQUE INDEX idx_users_email ON users (email);
+CREATE UNIQUE INDEX idx_users_email ON users(email);

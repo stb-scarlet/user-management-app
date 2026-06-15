@@ -46,7 +46,7 @@ router.post('/register', async (req, res) => {
     // Any e-mail-sending failure is only logged server-side and does
     // NOT fail the registration.
     sendConfirmationEmail(email, confirmationToken).catch((err) => {
-      console.error('Failed to send confirmation e-mail: ', err.message);
+      console.error('Failed to send confirmation e-mail:', err.message);
     });
 
     return res.status(201).json({
@@ -61,7 +61,7 @@ router.post('/register', async (req, res) => {
     if (err.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ error: 'This e-mail is already registered.' });
     }
-    console.error('Register error: ', err);
+    console.error('Register error:', err);
     return res.status(500).json({ error: 'Server error. Please try again later.' });
   }
 });
